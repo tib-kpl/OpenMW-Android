@@ -15,10 +15,81 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # Cross-compiles OpenMW + all dependencies for arm64 with the project's own
+  # buildscripts/build.sh (same command as the original .gitlab-ci.yml).
+  # Third-party prefixes and the engine build tree are cached, so only the first
+  # run (or a change to buildscripts/) takes hours.
+  native:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-multilib g++-multilib cmake ninja-build make \
+            autoconf automake libtool pkg-config nasm yasm gettext-base \
+            python3 wget curl unzip bzip2 xz-utils patch perl git bison flex \
+            texinfo zlib1g-dev
+
+      - name: Restore native build cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            source/buildscripts/build
+            source/buildscripts/prefix
+            source/buildscripts/toolchain
+            source/buildscripts/symbols
+          key: native-${{ runner.os }}-${{ hashFiles('source/buildscripts/CMakeLists.txt', 'source/buildscripts/build.sh', 'source/buildscripts/include/**', 'source/buildscripts/patches/**') }}
+          restore-keys: native-${{ runner.os }}-
+
+      - name: Build native payload (arm64)
+        working-directory: source/buildscripts
+        run: |
+          chmod +x build.sh include/*.sh
+          ./build.sh --arch arm64 --lto --jobs "$(nproc)"
+
+      - name: Verify payload and record library hash
+        working-directory: source
+        run: |
+          JNI=app/src/main/jniLibs/arm64-v8a/libopenmw.so
+          test -s "$JNI"
+          test -s app/src/main/assets/libopenmw/resources/version
+          printf '%s  %s\n' "$(sha256sum "$JNI" | cut -d' ' -f1)" "$JNI" > buildscripts/openmw-051-patch39-libopenmw.sha256
+          cat buildscripts/openmw-051-patch39-libopenmw.sha256
+
+      # Save even when the build fails/times out so the next run resumes.
+      - name: Save native build cache
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            source/buildscripts/build
+            source/buildscripts/prefix
+            source/buildscripts/toolchain
+            source/buildscripts/symbols
+          key: native-${{ runner.os }}-${{ hashFiles('source/buildscripts/CMakeLists.txt', 'source/buildscripts/build.sh', 'source/buildscripts/include/**', 'source/buildscripts/patches/**') }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-payload
+          retention-days: 3
+          path: |
+            source/app/src/main/jniLibs
+            source/app/src/main/assets
+            source/buildscripts/openmw-051-patch39-libopenmw.sha256
+
+  apk:
+    needs: native
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -27,18 +98,29 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install NDK
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null; "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;26.1.10909125" "platforms;android-35" "build-tools;35.0.0"
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      # The native engine (libopenmw.so + runtime assets) is built locally with
-      # source/tools/build-openmw-051-runtime.ps1 and uploaded once with
-      # source/tools/pack-native-payload.ps1 to the "native-payload" release.
-      - name: Download native payload
+      - name: Install Android SDK/NDK packages
         run: |
-          gh release download native-payload --pattern native-payload.zip --repo "$GITHUB_REPOSITORY"
-          unzip -q native-payload.zip -d source/
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" "ndk;26.1.10909125" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('source/**/*.gradle', 'source/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-payload
+          path: native
+
+      - name: Place native payload
+        run: |
+          cp -r native/app/src/main/jniLibs source/app/src/main/
+          cp -r native/app/src/main/assets source/app/src/main/
+          cp native/buildscripts/openmw-051-patch39-libopenmw.sha256 source/buildscripts/
 
       - name: Build release APK (mainline)
         working-directory: source
@@ -57,20 +139,22 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > release.jks
-            KS=release.jks; PASS="$KEYSTORE_PASSWORD"; ALIAS="$KEY_ALIAS"; KPASS="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+            PASS="$KEYSTORE_PASSWORD"; ALIAS="$KEY_ALIAS"; KPASS="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
           else
             echo "::warning::No KEYSTORE_BASE64 secret: signing with a throwaway key (updates over an older install will fail)."
             keytool -genkeypair -keystore release.jks -storepass android -keypass android \
               -alias key -dname "CN=OpenMW Android" -keyalg RSA -keysize 2048 -validity 10000
-            KS=release.jks; PASS=android; ALIAS=key; KPASS=android
+            PASS=android; ALIAS=key; KPASS=android
           fi
           "$BT/zipalign" -f -p 4 "$APK" aligned.apk
-          "$BT/apksigner" sign --ks "$KS" --ks-pass "pass:$PASS" --ks-key-alias "$ALIAS" \
+          "$BT/apksigner" sign --ks release.jks --ks-pass "pass:$PASS" --ks-key-alias "$ALIAS" \
             --key-pass "pass:$KPASS" --out OpenMW-Android.apk aligned.apk
           "$BT/apksigner" verify OpenMW-Android.apk
 
       - name: Publish release
         if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
           PRE=""
