@@ -254,6 +254,46 @@ class GameActivity : SDLActivity() {
             showProgressBar()
         else
             showControls()
+
+        installLauncherShortcut()
+    }
+
+    /**
+     * Small translucent red button in the top-left corner that quits the game
+     * and makes the next app start show the launcher instead of auto-launching.
+     * The process is killed on exit (see onDestroy), so the launcher cannot be
+     * shown in-process while the native engine is still loaded.
+     */
+    private fun installLauncherShortcut() {
+        val density = resources.displayMetrics.density
+        val size = (30 * density).toInt()
+        val margin = (6 * density).toInt()
+
+        val button = android.view.View(this)
+        button.background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(android.graphics.Color.argb(90, 220, 30, 30))
+            setStroke((2 * density).toInt(), android.graphics.Color.argb(140, 255, 255, 255))
+        }
+        button.contentDescription = getString(R.string.game_menu_shortcut_title)
+        button.setOnClickListener {
+            android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.game_menu_shortcut_title)
+                .setMessage(R.string.game_menu_shortcut_message)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    PreferenceManager.getDefaultSharedPreferences(this).edit()
+                        .putBoolean(Constants.SHOW_LAUNCHER_ONCE, true)
+                        .commit()
+                    finish()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+
+        val params = RelativeLayout.LayoutParams(size, size)
+        params.leftMargin = margin
+        params.topMargin = margin
+        layout.addView(button, params)
     }
 
     private fun prepareNativeDiagnostics() {

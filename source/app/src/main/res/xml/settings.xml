@@ -35,7 +35,7 @@
         <CheckBoxPreference android:key="pref_omw050_camera_listener" android:title="@string/pref_omw050_camera_listener_title" android:summary="@string/pref_omw050_camera_listener_summary" android:defaultValue="false" />
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/pref_advanced">
-        <CheckBoxPreference android:key="pref_skip_gui" android:title="@string/pref_skip_gui_title" android:summary="@string/pref_skip_gui_summary" android:defaultValue="false" />
+        <CheckBoxPreference android:key="pref_skip_gui" android:title="@string/pref_skip_gui_title" android:summary="@string/pref_skip_gui_summary" android:defaultValue="true" />
         <EditTextPreference android:key="commandLine" android:title="@string/pref_commandLine" />
         <EditTextPreference android:key="envLine" android:title="@string/pref_envLine" />
     </PreferenceCategory>

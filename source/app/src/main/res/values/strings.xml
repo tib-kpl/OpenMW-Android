@@ -244,6 +244,8 @@
     <string name="resolution_native">Native</string>
     <string name="resolution_invalid">Please enter a valid width and height.</string>
     <string name="launch_preparing">Loading…</string>
+    <string name="game_menu_shortcut_title">Back to launcher menu</string>
+    <string name="game_menu_shortcut_message">Quit the game and show the launcher menu on next start?</string>
     <string name="launch_preparing_game">Preparing OpenMW…</string>
     <string name="launch_failed_title">OpenMW launch failed</string>
     <string name="launch_failed_unknown">Unknown error while preparing OpenMW.</string>

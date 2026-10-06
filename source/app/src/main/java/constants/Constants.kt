@@ -59,6 +59,9 @@ object Constants {
     // User-editable OpenMW config below USER_CONFIG.
     var USER_OPENMW_CFG = ""
 
+    // One-shot flag set by the in-game menu button: show the launcher on next start.
+    const val SHOW_LAUNCHER_ONCE = "pref_show_launcher_once"
+
     // Contains app version code for currently deployed internal resources.
     var VERSION_STAMP = ""
 }

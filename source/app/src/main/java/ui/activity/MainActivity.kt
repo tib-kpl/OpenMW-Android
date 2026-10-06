@@ -124,9 +124,16 @@ class MainActivity : AppCompatActivity() {
         skipGuiOverrideRequested = false
         skipGuiVolumeOverrideHeld = false
         skipGuiDirectLaunchActive = false
+        // The in-game menu shortcut asks for the launcher to be shown once.
+        val showLauncherOnce = prefs.getBoolean(Constants.SHOW_LAUNCHER_ONCE, false)
+        if (showLauncherOnce) {
+            prefs.edit().putBoolean(Constants.SHOW_LAUNCHER_ONCE, false).apply()
+        }
+
         skipGuiAutoLaunchPending =
             savedInstanceState == null &&
-                prefs.getBoolean("pref_skip_gui", false) &&
+                !showLauncherOnce &&
+                prefs.getBoolean("pref_skip_gui", true) &&
                 !bugsnagConsentMissing
 
         PermissionHelper.getWriteExternalStoragePermission(this@MainActivity)
